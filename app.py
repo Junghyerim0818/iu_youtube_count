@@ -1,6 +1,6 @@
 from flask import Flask, render_template, jsonify
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
@@ -12,8 +12,8 @@ MV_LIST = ['Ct8NZdYWOFI','g3TP6XZ1Baw','0ZukHxqOA0o','slT80EySpKk','BYQBs_4-MOo'
 LIVE_LIST = ['K2nL1o2G79E','JtFI8dtPvxI','8zsYZFvKniw','m7mvpe1fVa4','L1JUfCyeT5E','3mk-DIcvVGU','3nDzKulmSpg','r3WS1BOpgk4','j3Aa1dgg8UI','FAI2wj2JGCI','UCQHgJ4uRwo','SmQhRHS9-YA','mcnFWBLrdCs','Xco5vbBmF5c','sAbU4fAqjZk','O-1FpjPP6_c','-_14Lhw0y1A','9WKzt9QEmD4','pDvBiB1waBk','nn1pbxe8bAI','o_nxIQTM_B0','3iM_06QeZi8','tJM0yIbg8iQ','OcVmaIlHZ1o','ax1csKKQnns','Cxzzg7L3Xgc']
 
 def get_next_update_time():
-    """다음 10분 단위 업데이트 시간 계산 (서버 기준)"""
-    now = datetime.now()
+    """다음 10분 단위 업데이트 시간 계산 (KST 기준)"""
+    now = datetime.now(timezone(timedelta(hours=9)))
     # 현재 분의 10분 단위 나머지
     minute_remainder = now.minute % 10
     # 나머지가 0이면 다음 10분 단위(10분 추가), 아니면 다음 10분 단위로 올림
@@ -113,9 +113,9 @@ def get_view_count(video_list):
 def main():
     mv_videos = get_view_count(MV_LIST)
     live_videos = get_view_count(LIVE_LIST)
-    update_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    update_time = datetime.now(timezone(timedelta(hours=9))).strftime('%Y-%m-%d %H:%M:%S')
     next_update_time = get_next_update_time()
-    server_time = datetime.now()
+    server_time = datetime.now(timezone(timedelta(hours=9)))
     return render_template('main.html', 
                          mv_videos=mv_videos,
                          live_videos=live_videos,
@@ -127,9 +127,9 @@ def main():
 def update_data():
     mv_videos = get_view_count(MV_LIST)
     live_videos = get_view_count(LIVE_LIST)
-    update_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    update_time = datetime.now(timezone(timedelta(hours=9))).strftime('%Y-%m-%d %H:%M:%S')
     next_update_time = get_next_update_time()
-    server_time = datetime.now()
+    server_time = datetime.now(timezone(timedelta(hours=9)))
     return jsonify({
         'mv_videos': mv_videos,
         'live_videos': live_videos,
@@ -139,5 +139,5 @@ def update_data():
     })
 
 if __name__ == '__main__':
+    app.run(port = 80, debug=True, host = '0.0.0.0')
 
-    app.run(port = 80, debug=True)
