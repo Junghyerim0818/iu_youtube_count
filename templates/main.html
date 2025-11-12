@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>IU Youtube View Count</title>
+    <!-- CSS 파일 연결 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script type="text/javascript">
+        // 서버 시간 데이터를 전역 변수로 설정
+        window.SERVER_DATA = {
+            next_update_time: '{{ next_update_time }}',
+            server_time: '{{ server_time }}'
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>아이유 유튜브 조회수 확인</h1>
+        <div class="update-info">
+            <div class="update-time">최종 업데이트: <span id="update-time">{{ update_time }}</span></div>
+            <div class="next-update">다음 업데이트까지: <span id="countdown">10:00</span></div>
+            <div class="loading" id="loading">업데이트 중...</div>
+        </div>
+        <div class="content">
+            <!-- 뮤직비디오 섹션 -->
+            <div class="video-section">
+                <h2 class="section-title">뮤직비디오</h2>
+                <div class="video-container" id="mv-container">
+                    {% for video in mv_videos %}
+                    <div class="video-item">
+                        <a href="https://www.youtube.com/watch?v={{ video.video_id }}" target="_blank" rel="noopener noreferrer">
+                            <img src="{{ video.thumbnail }}" alt="{{ video.title }}" class="video-thumbnail" onerror="this.style.display='none'">
+                        </a>
+                        <div class="video-info">
+                            <div class="video-title">{{ video.title }}</div>
+                            <div class="view-count">조회수: {{ video.view_count }}회</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <!-- 라이브클립 섹션 -->
+            <div class="video-section">
+                <h2 class="section-title">라이브클립</h2>
+                <div class="video-container" id="live-container">
+                    {% for video in live_videos %}
+                    <div class="video-item">
+                        <a href="https://www.youtube.com/watch?v={{ video.video_id }}" target="_blank" rel="noopener noreferrer">
+                            <img src="{{ video.thumbnail }}" alt="{{ video.title }}" class="video-thumbnail" onerror="this.style.display='none'">
+                        </a>
+                        <div class="video-info">
+                            <div class="video-title">{{ video.title }}</div>
+                            <div class="view-count">조회수: {{ video.view_count }}회</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript 파일 연결 -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
