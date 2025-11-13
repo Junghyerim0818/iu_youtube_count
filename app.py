@@ -1,9 +1,70 @@
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 import requests
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from zoneinfo import ZoneInfo
+import json
+import os     
 
 app = Flask(__name__)
+
+# 마지막 업데이트 시간 파일 경로
+LAST_UPDATE_TIME_FILE = 'last_update_time.json'
+
+def load_last_update_time():
+    """파일에서 마지막 업데이트 시간 로드"""
+    global last_update_time
+    if os.path.exists(LAST_UPDATE_TIME_FILE):
+        try:
+            with open(LAST_UPDATE_TIME_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                time_str = data.get('last_update_time')
+                if time_str:
+                    seoul_tz = ZoneInfo('Asia/Seoul')
+                    try:
+                        if 'T' in time_str:
+                            if '+' in time_str or time_str.endswith('Z'):
+                                dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+                                if dt.tzinfo:
+                                    dt = dt.astimezone(seoul_tz)
+                                else:
+                                    dt = dt.replace(tzinfo=seoul_tz)
+                            else:
+                                dt = datetime.fromisoformat(time_str).replace(tzinfo=seoul_tz)
+                        else:
+                            dt = datetime.fromisoformat(time_str + 'T00:00:00').replace(tzinfo=seoul_tz)
+                        
+                        last_update_time = dt
+                        print(f"마지막 업데이트 시간 로드: {last_update_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                        return last_update_time
+                    except ValueError as e:
+                        print(f"시간 파싱 오류: {e}")
+        except Exception as e:
+            print(f"마지막 업데이트 시간 로드 실패: {e}")
+    return None
+
+def save_last_update_time():
+    """파일에 마지막 업데이트 시간 저장"""
+    global last_update_time
+    if last_update_time:
+        try:
+            with open(LAST_UPDATE_TIME_FILE, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'last_update_time': last_update_time.isoformat()
+                }, f, ensure_ascii=False, indent=2)
+            print(f"마지막 업데이트 시간 저장: {last_update_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        except Exception as e:
+            print(f"마지막 업데이트 시간 저장 실패: {e}")
+
+# 서버 시작 시 마지막 업데이트 시간 로드
+last_update_time = load_last_update_time()
+
+# 캐시된 비디오 데이터
+cached_mv_videos = None
+cached_live_videos = None
+
+# 이전 조회수 저장 (비디오 ID를 키로 사용)
+previous_view_counts = {}
 
 # 뮤직비디오 ID 리스트
 MV_LIST = ['Ct8NZdYWOFI','g3TP6XZ1Baw','0ZukHxqOA0o','slT80EySpKk','BYQBs_4-MOo','7WINyXmPRAE','GHu39FEFIks','cxcxskPKtiI','Rh5ok0ljrzA','f_iQRO5BdCM','ouR4nn1G9r4','qGWZUtfV3IU','BkLKEsh6tZU','EiVmQZwJhsA','jeqdYqsrsA0','npttud7NkL0','js3PTlQFakk','BzYnNdJhZQw','86BST8NIpNM','d9IxdwEFk1c','R3Fwdnij49o','TgOu00Mf3kI','NJR8Inf77Ac','42Gtm4-Ax2U','v7bnOxV4jAc','nM0xDI5R50E','sqgxcCjD04s','D1PvIWdJ8xo','0-q1KafFCLU','Hsuy_xzPyWQ','VIDQTyNmkN4','c9E2IT1jHQY','l5Z1PBJLUss','ZXmoJu81e6A','6J9ixwhDYSM','mFbILexYSQg','JleoAppaxi0','kHW-UVXOcLU']
@@ -12,26 +73,33 @@ MV_LIST = ['Ct8NZdYWOFI','g3TP6XZ1Baw','0ZukHxqOA0o','slT80EySpKk','BYQBs_4-MOo'
 LIVE_LIST = ['JtFI8dtPvxI','8zsYZFvKniw','m7mvpe1fVa4','L1JUfCyeT5E','3mk-DIcvVGU','3nDzKulmSpg','r3WS1BOpgk4','j3Aa1dgg8UI','FAI2wj2JGCI','UCQHgJ4uRwo','SmQhRHS9-YA','mcnFWBLrdCs','Xco5vbBmF5c','sAbU4fAqjZk','O-1FpjPP6_c','-_14Lhw0y1A','9WKzt9QEmD4','pDvBiB1waBk','nn1pbxe8bAI','o_nxIQTM_B0','3iM_06QeZi8','tJM0yIbg8iQ','OcVmaIlHZ1o','ax1csKKQnns','Cxzzg7L3Xgc']
 
 def get_next_update_time():
-    """다음 10분 단위 업데이트 시간 계산 (KST 기준)"""
-    now = datetime.now(timezone(timedelta(hours=9)))
+    """다음 10분 단위 업데이트 시간 계산 (서울표준시 기준, 00분 기준)"""
+    # 서울 시간대 가져오기
+    seoul_tz = ZoneInfo('Asia/Seoul')
+    now_seoul = datetime.now(seoul_tz)
+    
     # 현재 분의 10분 단위 나머지
-    minute_remainder = now.minute % 10
+    minute_remainder = now_seoul.minute % 10
     # 나머지가 0이면 다음 10분 단위(10분 추가), 아니면 다음 10분 단위로 올림
     if minute_remainder == 0:
         minutes_to_add = 10
     else:
         minutes_to_add = 10 - minute_remainder
     # 초와 마이크로초를 0으로 설정하고 분 추가
-    next_update = now.replace(second=0, microsecond=0) + timedelta(minutes=minutes_to_add)
+    next_update = now_seoul.replace(second=0, microsecond=0) + timedelta(minutes=minutes_to_add)
+    
     return next_update
 
-def fetch_batch_videos(video_ids_batch):
+def fetch_batch_videos(video_ids_batch, previous_view_counts_dict=None):
     """배치로 비디오 정보 가져오기 (최대 50개)"""
     API_KEY = 'AIzaSyAmmehmaqCrWbKFwO6HhWMvQNtbbMDDaPQ'
     videos = []
     
     if not video_ids_batch:
         return videos
+    
+    if previous_view_counts_dict is None:
+        previous_view_counts_dict = {}
     
     try:
         # 여러 비디오 ID를 콤마로 구분하여 한 번에 요청
@@ -57,18 +125,31 @@ def fetch_batch_videos(video_ids_batch):
                     item = video_data_map[video_id]
                     view_count = item.get('statistics', {}).get('viewCount', '0')
                     video_name = item.get('snippet', {}).get('title', '제목 없음')
+                    published_at = item.get('snippet', {}).get('publishedAt', '')
                     thumbnails = item.get('snippet', {}).get('thumbnails', {})
-                    thumbnail_url = thumbnails.get('medium', {}).get('url') or \
-                                thumbnails.get('high', {}).get('url') or \
-                                thumbnails.get('default', {}).get('url', '')
+                    
+                    # 고화질 썸네일 우선순위: maxres > high > medium > default
+                    thumbnail_url = (thumbnails.get('maxres', {}).get('url') or
+                                   thumbnails.get('high', {}).get('url') or
+                                   thumbnails.get('medium', {}).get('url') or
+                                   thumbnails.get('default', {}).get('url', ''))
+                    
                     view_count_int = int(view_count)
+                    
+                    # 이전 조회수 가져오기
+                    previous_view_count = previous_view_counts_dict.get(video_id, view_count_int)
+                    view_count_change = view_count_int - previous_view_count
                     
                     videos.append({
                         'title': video_name,
                         'view_count': format(view_count_int, ','),
                         'view_count_raw': view_count_int,
-                        'thumbnail': thumbnail_url,  # API에서 가져오기
-                        'video_id': video_id
+                        'published_at': published_at,
+                        'published_at_raw': published_at,  # 정렬용
+                        'thumbnail': thumbnail_url,
+                        'video_id': video_id,
+                        'view_count_change': view_count_change,
+                        'view_count_change_formatted': format(view_count_change, ',') if view_count_change != 0 else '0'
                     })
                 else:
                     print(f"비디오 ID {video_id}에 대한 데이터를 찾을 수 없습니다.")
@@ -82,8 +163,10 @@ def fetch_batch_videos(video_ids_batch):
     
     return videos
 
-def get_view_count(video_list):
-    """비디오 조회수 가져오기 (배치 요청 + 병렬 처리)"""
+def get_view_count(video_list, update_timestamp=True):
+    """비디오 조회수 가져오기 (배치 요청 + 병렬 처리) - 정렬은 클라이언트에서 수행"""
+    global last_update_time, previous_view_counts
+    
     if not video_list:
         return []
     
@@ -95,7 +178,7 @@ def get_view_count(video_list):
     
     # 병렬 처리로 여러 배치를 동시에 요청
     with ThreadPoolExecutor(max_workers=3) as executor:
-        future_to_batch = {executor.submit(fetch_batch_videos, batch): batch for batch in batches}
+        future_to_batch = {executor.submit(fetch_batch_videos, batch, previous_view_counts): batch for batch in batches}
         
         for future in as_completed(future_to_batch):
             batch = future_to_batch[future]
@@ -105,40 +188,85 @@ def get_view_count(video_list):
             except Exception as e:
                 print(f"배치 처리 오류: {e}")
     
-    # 조회수 내림차순으로 정렬 (높은 조회수부터)
-    videos.sort(key=lambda x: x['view_count_raw'], reverse=True)
+    # 기본 정렬: 조회수 내림차순 (클라이언트에서 재정렬 가능)
+    videos.sort(key=lambda x: x.get('view_count_raw', 0), reverse=True)
+    
+    # 현재 조회수를 이전 조회수로 저장 (다음 업데이트를 위해)
+    if update_timestamp:
+        for video in videos:
+            previous_view_counts[video['video_id']] = video['view_count_raw']
+        seoul_tz = ZoneInfo('Asia/Seoul')
+        last_update_time = datetime.now(seoul_tz)
+        save_last_update_time()
+    
     return videos
 
 @app.route('/')
 def main():
-    mv_videos = get_view_count(MV_LIST)
-    live_videos = get_view_count(LIVE_LIST)
-    update_time = datetime.now(timezone(timedelta(hours=9))).strftime('%Y-%m-%d %H:%M:%S')
+    global last_update_time, cached_mv_videos, cached_live_videos
+    
+    # 캐시된 데이터가 없으면 초기 데이터만 가져오기 (시간 업데이트 안 함)
+    if cached_mv_videos is None or cached_live_videos is None:
+        # 초기 데이터 가져오기 (시간은 업데이트하지 않음)
+        cached_mv_videos = get_view_count(MV_LIST, update_timestamp=False)
+        cached_live_videos = get_view_count(LIVE_LIST, update_timestamp=False)
+        
+        # last_update_time이 None이면 초기 시간 설정 (한 번만, 서버 시작 시)
+                # last_update_time이 여전히 None이면 (파일에서도 로드 못한 경우)
+        if last_update_time is None:
+            # 파일에서 다시 로드 시도
+            last_update_time = load_last_update_time()
+            # 파일에서도 로드 못한 경우에만 현재 시간 사용 (파일에는 저장하지 않음)
+            if last_update_time is None:
+                seoul_tz = ZoneInfo('Asia/Seoul')
+                last_update_time = datetime.now(seoul_tz)
+                print(f"초기 업데이트 시간 설정 (첫 실행, 파일 미저장): {last_update_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                # 첫 실행이므로 파일에 저장하지 않음 (실제 업데이트 시에만 저장)
+    
+    # 마지막 업데이트 시간 포맷팅 (항상 설정된 시간 사용)
+    if last_update_time:
+        update_time = last_update_time.strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        # fallback (실제로는 실행되지 않아야 함)
+        seoul_tz = ZoneInfo('Asia/Seoul')
+        update_time = datetime.now(seoul_tz).strftime('%Y-%m-%d %H:%M:%S')
+    
     next_update_time = get_next_update_time()
-    server_time = datetime.now(timezone(timedelta(hours=9)))
+    seoul_tz = ZoneInfo('Asia/Seoul')
+    server_time = datetime.now(seoul_tz)
     return render_template('main.html', 
-                         mv_videos=mv_videos,
-                         live_videos=live_videos,
+                         mv_videos=cached_mv_videos or [],
+                         live_videos=cached_live_videos or [],
                          update_time=update_time,
                          next_update_time=next_update_time.isoformat(),
                          server_time=server_time.isoformat())
 
 @app.route('/api/update')
 def update_data():
-    mv_videos = get_view_count(MV_LIST)
-    live_videos = get_view_count(LIVE_LIST)
-    update_time = datetime.now(timezone(timedelta(hours=9))).strftime('%Y-%m-%d %H:%M:%S')
+    global last_update_time, cached_mv_videos, cached_live_videos
+    
+    # 실제 데이터 업데이트 수행 (시간 갱신 및 캐시 업데이트)
+    # 정렬은 클라이언트에서 수행하므로 서버에서는 기본 정렬만 사용
+    cached_mv_videos = get_view_count(MV_LIST, update_timestamp=True)
+    cached_live_videos = get_view_count(LIVE_LIST, update_timestamp=True)
+    
+    # 마지막 업데이트 시간 포맷팅
+    if last_update_time:
+        update_time = last_update_time.strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        seoul_tz = ZoneInfo('Asia/Seoul')
+        update_time = datetime.now(seoul_tz).strftime('%Y-%m-%d %H:%M:%S')
+    
     next_update_time = get_next_update_time()
-    server_time = datetime.now(timezone(timedelta(hours=9)))
+    seoul_tz = ZoneInfo('Asia/Seoul')
+    server_time = datetime.now(seoul_tz)
     return jsonify({
-        'mv_videos': mv_videos,
-        'live_videos': live_videos,
+        'mv_videos': cached_mv_videos,
+        'live_videos': cached_live_videos,
         'update_time': update_time,
         'next_update_time': next_update_time.isoformat(),
         'server_time': server_time.isoformat()
     })
 
 if __name__ == '__main__':
-    app.run(port = 80, debug=True, host = '0.0.0.0')
-
-
+    app.run(port = 80, host='0.0.0.0', debug=True)
