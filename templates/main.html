@@ -21,27 +21,36 @@
 </head>
 <body>
     <div class="container">
-        <h1>아이유 유튜브 조회수 확인</h1>
+        <!-- 헤더 섹션 -->
+        <div class="page-header">
+            <div class="header-top">
+                <div class="category-label" id="category-label">뮤직비디오</div>
+                <div class="sort-options">
+                    <label for="sort-select">정렬방법</label>
+                    <select id="sort-select" class="sort-select">
+                        <option value="view_count">조회수 높은 순</option>
+                        <option value="published_at">게시일자순</option>
+                    </select>
+                </div>
+            </div>
+            <h1>
+                <span class="title-main">아이유 유튜브 조회수 확인</span>
+            </h1>
+        </div>
+        
         <div class="update-info">
             <div class="update-time">최종 업데이트: <span id="update-time">{{ update_time }}</span></div>
             <div class="next-update">다음 업데이트까지: <span id="countdown">10:00</span></div>
             <div class="loading" id="loading">업데이트 중...</div>
         </div>
         
-        <!-- 탭 메뉴와 정렬 옵션 -->
-        <div class="header-controls">
-            <div class="tab-menu">
+        <!-- 탭 메뉴 -->
+        <div class="tab-menu">
+            <div class="tab-buttons">
                 <button class="tab-btn active" data-tab="mv" id="tab-mv">뮤직비디오</button>
                 <button class="tab-btn" data-tab="live" id="tab-live">라이브클립</button>
             </div>
-            <!-- 정렬 옵션 - 오른쪽 정렬 -->
-            <div class="sort-options">
-                <label for="sort-select">정렬 기준:</label>
-                <select id="sort-select" class="sort-select">
-                    <option value="view_count">조회수순</option>
-                    <option value="published_at">게시일자순</option>
-                </select>
-            </div>
+            <span class="title-count" id="title-count"></span>
         </div>
         
         <div class="content">
@@ -49,10 +58,8 @@
             <div class="video-section active" id="mv-section">
                 <div class="video-container" id="mv-container">
                     {% for video in mv_videos %}
-                    <div class="video-item">
-                        <a href="https://www.youtube.com/watch?v={{ video.video_id }}" target="_blank" rel="noopener noreferrer">
-                            <img src="{{ video.thumbnail }}" alt="{{ video.title }}" class="video-thumbnail" onerror="this.style.display='none'">
-                        </a>
+                    <a href="https://www.youtube.com/watch?v={{ video.video_id }}" target="_blank" rel="noopener noreferrer" class="video-item">
+                        <img src="{{ video.thumbnail }}" alt="{{ video.title }}" class="video-thumbnail" onerror="this.style.display='none'">
                         <div class="video-info">
                             <div class="video-title">{{ video.title }}</div>
                             <div class="video-details">
@@ -65,7 +72,7 @@
                                 {% endif %}
                             </div>
                         </div>
-                    </div>
+                    </a>
                     {% endfor %}
                 </div>
             </div>
@@ -74,10 +81,8 @@
             <div class="video-section" id="live-section">
                 <div class="video-container" id="live-container">
                     {% for video in live_videos %}
-                    <div class="video-item">
-                        <a href="https://www.youtube.com/watch?v={{ video.video_id }}" target="_blank" rel="noopener noreferrer">
-                            <img src="{{ video.thumbnail }}" alt="{{ video.title }}" class="video-thumbnail" onerror="this.style.display='none'">
-                        </a>
+                    <a href="https://www.youtube.com/watch?v={{ video.video_id }}" target="_blank" rel="noopener noreferrer" class="video-item">
+                        <img src="{{ video.thumbnail }}" alt="{{ video.title }}" class="video-thumbnail" onerror="this.style.display='none'">
                         <div class="video-info">
                             <div class="video-title">{{ video.title }}</div>
                             <div class="video-details">
@@ -90,7 +95,7 @@
                                 {% endif %}
                             </div>
                         </div>
-                    </div>
+                    </a>
                     {% endfor %}
                 </div>
             </div>
