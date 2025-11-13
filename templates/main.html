@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IU Youtube View Count</title>
     <!-- CSS 파일 연결 -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -10,6 +11,11 @@
         window.SERVER_DATA = {
             next_update_time: '{{ next_update_time }}',
             server_time: '{{ server_time }}'
+        };
+        // 초기 데이터 설정
+        window.INITIAL_DATA = {
+            mv_videos: {{ mv_videos | tojson }},
+            live_videos: {{ live_videos | tojson }}
         };
     </script>
 </head>
@@ -21,10 +27,26 @@
             <div class="next-update">다음 업데이트까지: <span id="countdown">10:00</span></div>
             <div class="loading" id="loading">업데이트 중...</div>
         </div>
+        
+        <!-- 탭 메뉴와 정렬 옵션 -->
+        <div class="header-controls">
+            <div class="tab-menu">
+                <button class="tab-btn active" data-tab="mv" id="tab-mv">뮤직비디오</button>
+                <button class="tab-btn" data-tab="live" id="tab-live">라이브클립</button>
+            </div>
+            <!-- 정렬 옵션 - 오른쪽 정렬 -->
+            <div class="sort-options">
+                <label for="sort-select">정렬 기준:</label>
+                <select id="sort-select" class="sort-select">
+                    <option value="view_count">조회수순</option>
+                    <option value="published_at">게시일자순</option>
+                </select>
+            </div>
+        </div>
+        
         <div class="content">
             <!-- 뮤직비디오 섹션 -->
-            <div class="video-section">
-                <h2 class="section-title">뮤직비디오</h2>
+            <div class="video-section active" id="mv-section">
                 <div class="video-container" id="mv-container">
                     {% for video in mv_videos %}
                     <div class="video-item">
@@ -33,7 +55,15 @@
                         </a>
                         <div class="video-info">
                             <div class="video-title">{{ video.title }}</div>
-                            <div class="view-count">조회수: {{ video.view_count }}회</div>
+                            <div class="video-details">
+                                <div class="view-count">
+                                    조회수: {{ video.view_count }}회
+                                    <span class="view-change-inline" data-change="{{ video.view_count_change }}"></span>
+                                </div>
+                                {% if video.published_at %}
+                                <div class="published-date">게시일자: <span class="date-value">{{ video.published_at[:10] }}</span></div>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     {% endfor %}
@@ -41,8 +71,7 @@
             </div>
             
             <!-- 라이브클립 섹션 -->
-            <div class="video-section">
-                <h2 class="section-title">라이브클립</h2>
+            <div class="video-section" id="live-section">
                 <div class="video-container" id="live-container">
                     {% for video in live_videos %}
                     <div class="video-item">
@@ -51,7 +80,15 @@
                         </a>
                         <div class="video-info">
                             <div class="video-title">{{ video.title }}</div>
-                            <div class="view-count">조회수: {{ video.view_count }}회</div>
+                            <div class="video-details">
+                                <div class="view-count">
+                                    조회수: {{ video.view_count }}회
+                                    <span class="view-change-inline" data-change="{{ video.view_count_change }}"></span>
+                                </div>
+                                {% if video.published_at %}
+                                <div class="published-date">게시일자: <span class="date-value">{{ video.published_at[:10] }}</span></div>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     {% endfor %}
