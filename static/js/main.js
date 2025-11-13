@@ -41,6 +41,34 @@ function switchTab(tabName) {
     } else {
         console.error('섹션을 찾을 수 없음:', `${tabName}-section`);
     }
+    
+    // 카테고리 라벨 업데이트
+    const categoryLabel = document.getElementById('category-label');
+    if (categoryLabel) {
+        categoryLabel.textContent = tabName === 'mv' ? '뮤직비디오' : '라이브클립';
+    }
+    
+    // 제목 카운트 업데이트
+    updateTitleCount();
+}
+
+// 제목 카운트 업데이트 함수
+function updateTitleCount() {
+    const titleCount = document.getElementById('title-count');
+    if (!titleCount || !window.INITIAL_DATA) return;
+    
+    let count = 0;
+    if (currentTab === 'mv' && window.INITIAL_DATA.mv_videos) {
+        count = window.INITIAL_DATA.mv_videos.length;
+    } else if (currentTab === 'live' && window.INITIAL_DATA.live_videos) {
+        count = window.INITIAL_DATA.live_videos.length;
+    }
+    
+    if (count > 0) {
+        titleCount.textContent = `${count}편`;
+    } else {
+        titleCount.textContent = '';
+    }
 }
 
 // 정렬 함수
@@ -97,10 +125,8 @@ function createVideoHTML(video) {
     }
     
     return `
-        <div class="video-item">
-            <a href="https://www.youtube.com/watch?v=${video.video_id || ''}" target="_blank" rel="noopener noreferrer">
-                <img src="${video.thumbnail || ''}" alt="${video.title || ''}" class="video-thumbnail" onerror="this.style.display='none'">
-            </a>
+        <a href="https://www.youtube.com/watch?v=${video.video_id || ''}" target="_blank" rel="noopener noreferrer" class="video-item">
+            <img src="${video.thumbnail || ''}" alt="${video.title || ''}" class="video-thumbnail" onerror="this.style.display='none'">
             <div class="video-info">
                 <div class="video-title">${video.title || '제목 없음'}</div>
                 <div class="video-details">
@@ -111,7 +137,7 @@ function createVideoHTML(video) {
                     ${publishedDate ? `<div class="published-date">게시일자: <span class="date-value">${publishedDate}</span></div>` : ''}
                 </div>
             </div>
-        </div>
+        </a>
     `;
 }
 
@@ -212,6 +238,9 @@ function updateData() {
                 renderVideos(data.live_videos, 'live-container');
             }
             
+            // 제목 카운트 업데이트
+            updateTitleCount();
+            
             // 업데이트 시간 업데이트
             const updateTimeElement = document.getElementById('update-time');
             if (updateTimeElement && data.update_time) {
@@ -268,6 +297,9 @@ document.addEventListener('DOMContentLoaded', function() {
         
         renderVideos(window.INITIAL_DATA.mv_videos || [], 'mv-container');
         renderVideos(window.INITIAL_DATA.live_videos || [], 'live-container');
+        
+        // 초기 제목 카운트 업데이트
+        updateTitleCount();
     }
     
     // 탭 버튼 이벤트 리스너 - 모든 탭 버튼에 이벤트 추가
