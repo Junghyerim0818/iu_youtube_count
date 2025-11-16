@@ -16,8 +16,13 @@
         window.INITIAL_DATA = {
             mv_videos: {{ mv_videos | tojson }},
             live_videos: {{ live_videos | tojson }}
+        
         };
     </script>
+    <script>
+      window.va = window.va || function(){ (window.vaq = window.vaq || []).push(arguments) }
+    </script>
+    <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
     <div class="container">
@@ -106,3 +111,4 @@
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
+
