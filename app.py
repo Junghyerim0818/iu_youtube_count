@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
 import json
 import os     
+import threading
+import time
 
 app = Flask(__name__)
 
@@ -166,6 +168,7 @@ def fetch_batch_videos(video_ids_batch, previous_view_counts_dict=None):
 def get_view_count(video_list, update_timestamp=True):
     """비디오 조회수 가져오기 (배치 요청 + 병렬 처리) - 정렬은 클라이언트에서 수행"""
     global last_update_time, previous_view_counts
+	# update_timestamp는 이제 스케줄러에서 시간 정렬을 위해 사용하지 않음
     
     if not video_list:
         return []
@@ -196,32 +199,96 @@ def get_view_count(video_list, update_timestamp=True):
         for video in videos:
             previous_view_counts[video['video_id']] = video['view_count_raw']
         seoul_tz = ZoneInfo('Asia/Seoul')
-        last_update_time = datetime.now(seoul_tz)
+		last_update_time = datetime.now(seoul_tz)
         save_last_update_time()
     
     return videos
+
+def get_current_seoul_time():
+	"""서울 현재 시간"""
+	seoul_tz = ZoneInfo('Asia/Seoul')
+	return datetime.now(seoul_tz)
+
+def get_aligned_10min_floor(dt: datetime):
+	"""주어진 시간의 10분 단위 바닥 정렬 시간 (초/마이크로초 0)"""
+	return dt.replace(minute=(dt.minute // 10) * 10, second=0, microsecond=0)
+
+def perform_aligned_update(aligned_time: datetime | None = None):
+	"""
+	서버 기준 10분 단위 정렬 시간으로 캐시 갱신 및 마지막 업데이트 시간 설정
+	"""
+	global cached_mv_videos, cached_live_videos, last_update_time, previous_view_counts
+
+	# 정렬 시간이 없으면 현재 시간을 바닥 정렬
+	now_seoul = get_current_seoul_time()
+	if aligned_time is None:
+		aligned_time = get_aligned_10min_floor(now_seoul)
+
+	# 데이터 가져오기 (시간은 여기서 직접 설정하므로 get_view_count에서는 시간 갱신하지 않음)
+	mv_videos = get_view_count(MV_LIST, update_timestamp=False)
+	live_videos = get_view_count(LIVE_LIST, update_timestamp=False)
+
+	# 캐시 반영
+	cached_mv_videos = mv_videos
+	cached_live_videos = live_videos
+
+	# 다음 계산을 위해 이전 조회수 갱신
+	for video in (mv_videos or []):
+		previous_view_counts[video['video_id']] = video['view_count_raw']
+	for video in (live_videos or []):
+		previous_view_counts[video['video_id']] = video['view_count_raw']
+
+	# 마지막 업데이트 시간은 10분 단위 정렬 시각으로 설정
+	last_update_time = aligned_time
+	save_last_update_time()
+
+def _background_updater_loop():
+	"""
+	서버 프로세스에서 10분 단위 정렬 기준으로 주기적 업데이트 수행
+	"""
+	# 최초 실행: 방금 지난 10분 경계로 정렬하여 즉시 한 번 업데이트
+	initial_aligned = get_aligned_10min_floor(get_current_seoul_time())
+	try:
+		perform_aligned_update(initial_aligned)
+	except Exception as e:
+		print(f"초기 백그라운드 업데이트 실패: {e}")
+
+	# 다음 10분 경계까지 대기
+	while True:
+		try:
+			now = get_current_seoul_time()
+			next_aligned = get_next_update_time()
+			# 대기 시간(초)
+			sleep_seconds = max(1, int((next_aligned - now).total_seconds()))
+			time.sleep(sleep_seconds)
+
+			# 경계 시각으로 업데이트
+			perform_aligned_update(next_aligned)
+		except Exception as e:
+			print(f"백그라운드 업데이트 루프 오류: {e}")
+			# 오류 시 60초 후 재시도
+			time.sleep(60)
+
+def start_background_updater():
+	"""
+	디버그 리로더로 인한 중복 실행을 피하며 백그라운드 스레드를 시작
+	"""
+	is_main = os.environ.get('WERKZEUG_RUN_MAIN') == 'true' if app.debug else True
+	if is_main:
+		thread = threading.Thread(target=_background_updater_loop, daemon=True)
+		thread.start()
+		print("백그라운드 10분 단위 업데이트 스케줄러 시작")
 
 @app.route('/')
 def main():
     global last_update_time, cached_mv_videos, cached_live_videos
     
-    # 캐시된 데이터가 없으면 초기 데이터만 가져오기 (시간 업데이트 안 함)
+	# 캐시가 아직 없다면 즉시 한 번 정렬된 시간으로 업데이트
     if cached_mv_videos is None or cached_live_videos is None:
-        # 초기 데이터 가져오기 (시간은 업데이트하지 않음)
-        cached_mv_videos = get_view_count(MV_LIST, update_timestamp=False)
-        cached_live_videos = get_view_count(LIVE_LIST, update_timestamp=False)
-        
-        # last_update_time이 None이면 초기 시간 설정 (한 번만, 서버 시작 시)
-                # last_update_time이 여전히 None이면 (파일에서도 로드 못한 경우)
-        if last_update_time is None:
-            # 파일에서 다시 로드 시도
-            last_update_time = load_last_update_time()
-            # 파일에서도 로드 못한 경우에만 현재 시간 사용 (파일에는 저장하지 않음)
-            if last_update_time is None:
-                seoul_tz = ZoneInfo('Asia/Seoul')
-                last_update_time = datetime.now(seoul_tz)
-                print(f"초기 업데이트 시간 설정 (첫 실행, 파일 미저장): {last_update_time.strftime('%Y-%m-%d %H:%M:%S')}")
-                # 첫 실행이므로 파일에 저장하지 않음 (실제 업데이트 시에만 저장)
+		try:
+			perform_aligned_update(get_aligned_10min_floor(get_current_seoul_time()))
+		except Exception as e:
+			print(f"요청 시 초기 업데이트 실패: {e}")
     
     # 마지막 업데이트 시간 포맷팅 (항상 설정된 시간 사용)
     if last_update_time:
@@ -245,10 +312,11 @@ def main():
 def update_data():
     global last_update_time, cached_mv_videos, cached_live_videos
     
-    # 실제 데이터 업데이트 수행 (시간 갱신 및 캐시 업데이트)
-    # 정렬은 클라이언트에서 수행하므로 서버에서는 기본 정렬만 사용
-    cached_mv_videos = get_view_count(MV_LIST, update_timestamp=True)
-    cached_live_videos = get_view_count(LIVE_LIST, update_timestamp=True)
+	# 서버 기준 10분 바닥 정렬 시간으로 즉시 업데이트 실행
+	try:
+		perform_aligned_update(get_aligned_10min_floor(get_current_seoul_time()))
+	except Exception as e:
+		print(f"/api/update 처리 실패: {e}")
     
     # 마지막 업데이트 시간 포맷팅
     if last_update_time:
@@ -269,4 +337,7 @@ def update_data():
     })
 
 if __name__ == '__main__':
+	# 백그라운드 10분 단위 업데이트 시작
+	start_background_updater()
     app.run(port = 80, host='0.0.0.0', debug=True)
+
