@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
 import json
 import os     
+import time
+import threading
 
 app = Flask(__name__)
 
@@ -89,6 +91,19 @@ def get_next_update_time():
     next_update = now_seoul.replace(second=0, microsecond=0) + timedelta(minutes=minutes_to_add)
     
     return next_update
+
+def get_prev_update_time(dt=None):
+    """이전(바닥) 10분 단위 시간 계산 (서울표준시 기준)"""
+    seoul_tz = ZoneInfo('Asia/Seoul')
+    if dt is None:
+        dt = datetime.now(seoul_tz)
+    else:
+        if dt.tzinfo:
+            dt = dt.astimezone(seoul_tz)
+        else:
+            dt = dt.replace(tzinfo=seoul_tz)
+    floored_minute = (dt.minute // 10) * 10
+    return dt.replace(minute=floored_minute, second=0, microsecond=0)
 
 def fetch_batch_videos(video_ids_batch, previous_view_counts_dict=None):
     """배치로 비디오 정보 가져오기 (최대 50개)"""
@@ -195,8 +210,8 @@ def get_view_count(video_list, update_timestamp=True):
     if update_timestamp:
         for video in videos:
             previous_view_counts[video['video_id']] = video['view_count_raw']
-        seoul_tz = ZoneInfo('Asia/Seoul')
-        last_update_time = datetime.now(seoul_tz)
+        # 최종 업데이트 시간을 10분 단위 경계로 설정
+        last_update_time = get_prev_update_time()
         save_last_update_time()
     
     return videos
@@ -218,8 +233,8 @@ def main():
             last_update_time = load_last_update_time()
             # 파일에서도 로드 못한 경우에만 현재 시간 사용 (파일에는 저장하지 않음)
             if last_update_time is None:
-                seoul_tz = ZoneInfo('Asia/Seoul')
-                last_update_time = datetime.now(seoul_tz)
+                # 최초 진입 시에도 10분 단위 경계 시간으로 설정
+                last_update_time = get_prev_update_time()
                 print(f"초기 업데이트 시간 설정 (첫 실행, 파일 미저장): {last_update_time.strftime('%Y-%m-%d %H:%M:%S')}")
                 # 첫 실행이므로 파일에 저장하지 않음 (실제 업데이트 시에만 저장)
     
@@ -227,9 +242,8 @@ def main():
     if last_update_time:
         update_time = last_update_time.strftime('%Y-%m-%d %H:%M:%S')
     else:
-        # fallback (실제로는 실행되지 않아야 함)
-        seoul_tz = ZoneInfo('Asia/Seoul')
-        update_time = datetime.now(seoul_tz).strftime('%Y-%m-%d %H:%M:%S')
+        # fallback: 현재 시간을 10분 단위로 내림
+        update_time = get_prev_update_time().strftime('%Y-%m-%d %H:%M:%S')
     
     next_update_time = get_next_update_time()
     seoul_tz = ZoneInfo('Asia/Seoul')
@@ -245,17 +259,17 @@ def main():
 def update_data():
     global last_update_time, cached_mv_videos, cached_live_videos
     
-    # 실제 데이터 업데이트 수행 (시간 갱신 및 캐시 업데이트)
-    # 정렬은 클라이언트에서 수행하므로 서버에서는 기본 정렬만 사용
-    cached_mv_videos = get_view_count(MV_LIST, update_timestamp=True)
-    cached_live_videos = get_view_count(LIVE_LIST, update_timestamp=True)
+    # 백그라운드 스케줄러가 주기적으로 갱신하므로 여기서는 캐시만 반환
+    if cached_mv_videos is None or cached_live_videos is None:
+        # 캐시가 아직 없으면 초기 로드만 수행 (시간 업데이트 안 함)
+        cached_mv_videos = get_view_count(MV_LIST, update_timestamp=False)
+        cached_live_videos = get_view_count(LIVE_LIST, update_timestamp=False)
     
     # 마지막 업데이트 시간 포맷팅
     if last_update_time:
         update_time = last_update_time.strftime('%Y-%m-%d %H:%M:%S')
     else:
-        seoul_tz = ZoneInfo('Asia/Seoul')
-        update_time = datetime.now(seoul_tz).strftime('%Y-%m-%d %H:%M:%S')
+        update_time = get_prev_update_time().strftime('%Y-%m-%d %H:%M:%S')
     
     next_update_time = get_next_update_time()
     seoul_tz = ZoneInfo('Asia/Seoul')
@@ -268,6 +282,36 @@ def update_data():
         'server_time': server_time.isoformat()
     })
 
+def _background_updater():
+    """10분 단위 경계에 맞춰 주기적으로 데이터 갱신"""
+    global cached_mv_videos, cached_live_videos
+    while True:
+        try:
+            # 다음 경계 시각까지 대기
+            next_time = get_next_update_time()
+            now = datetime.now(ZoneInfo('Asia/Seoul'))
+            sleep_seconds = max(0.0, (next_time - now).total_seconds()) + 1.0
+            time.sleep(sleep_seconds)
+            # 데이터 갱신 (시간은 내부에서 10분 경계로 기록)
+            cached_mv_videos = get_view_count(MV_LIST, update_timestamp=True)
+            cached_live_videos = get_view_count(LIVE_LIST, update_timestamp=True)
+            print(f"백그라운드 갱신 완료: {get_prev_update_time().strftime('%Y-%m-%d %H:%M:%S')}")
+        except Exception as e:
+            print(f"백그라운드 갱신 오류: {e}")
+            # 오류 시 잠깐 대기 후 재시도
+            time.sleep(5)
+
+def _start_background_thread():
+    """Flask 디버그 리로더 중복 실행 방지하여 스레드 시작"""
+    should_start = True
+    if app.debug:
+        # werkzeug 리로더 환경에서 메인 프로세스만 실행
+        should_start = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    if should_start:
+        t = threading.Thread(target=_background_updater, daemon=True)
+        t.start()
+
 if __name__ == '__main__':
+    _start_background_thread()
     app.run(port = 80, host='0.0.0.0', debug=True)
 
